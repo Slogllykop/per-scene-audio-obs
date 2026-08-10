@@ -16,7 +16,7 @@ from .obs_helpers import current_scene_name
 from .audio_engine import apply_rules_for_scene
 
 
-# Reference to the config manager — set by main.py during script_load
+# Reference to the config manager - set by main.py during script_load
 _config_manager = None
 
 
@@ -35,7 +35,7 @@ def event_handler_shutdown():
 
 
 def _on_frontend_event(event):
-    """Called by OBS for every frontend event — we filter for scene changes."""
+    """Called by OBS for every frontend event - we filter for scene changes."""
     try:
         if event == getattr(obs, TRIGGER_EVENT):
             scene = current_scene_name()

@@ -15,7 +15,10 @@ from http.server import HTTPServer
 import obspython as obs
 
 from .constants import PLUGIN_LOG_PREFIX, HTTP_HOST, DEFAULT_HTTP_PORT
-from .obs_helpers import get_scene_names, get_audio_track_names, current_scene_name
+from .obs_helpers import (
+    get_scene_names, get_audio_track_names, current_scene_name,
+    get_scene_audio_tracks, get_source_state,
+)
 from .audio_engine import apply_rules_for_scene
 from .ui.templates import get_dock_html
 from .ui.api_routes import ApiHandler
@@ -58,6 +61,7 @@ def http_server_start(config_manager, port=None):
     _server.config_manager = config_manager
     _server.dock_html = dock_html
     _server.get_obs_state = _get_obs_state
+    _server.get_scene_tracks_cb = _get_scene_tracks
     _server.apply_callback = _apply_current_scene
 
     _thread = threading.Thread(target=_server.serve_forever, daemon=True)
@@ -69,7 +73,7 @@ def http_server_start(config_manager, port=None):
     )
     obs.script_log(
         obs.LOG_INFO,
-        "%s → Add a Custom Browser Dock in OBS pointing to http://%s:%d" % (PLUGIN_LOG_PREFIX, HTTP_HOST, port),
+        "%s -> Add a Custom Browser Dock in OBS pointing to http://%s:%d" % (PLUGIN_LOG_PREFIX, HTTP_HOST, port),
     )
 
 
@@ -88,12 +92,60 @@ def http_server_stop():
 # ------------------------------------------------------------------
 
 def _get_obs_state():
-    """Return (scenes, audio_tracks, current_scene)."""
+    """Return (scenes, current_scene)."""
     return (
         get_scene_names(),
-        get_audio_track_names(),
         current_scene_name(),
     )
+
+
+def _get_scene_tracks(scene_name):
+    """
+    Return a list of dicts for each audio track in the given scene.
+
+    Each dict contains:
+    - name: the source name
+    - mute: current OBS mixer mute state (bool)
+    - volume_db: current OBS mixer volume in dB (float)
+
+    If the user has saved rules for this scene+track, those are overlaid
+    so the UI shows the saved state rather than the live mixer state.
+    """
+    track_names = get_scene_audio_tracks(scene_name)
+    result = []
+
+    # Get saved rules for this scene (if any)
+    saved_rules = {}
+    if _config_manager:
+        all_rules = _config_manager.get_rules()
+        saved_rules = all_rules.get(scene_name, {})
+
+    for name in track_names:
+        # Start with the current live mixer state as default
+        state = get_source_state(name)
+        if state is None:
+            continue
+
+        # If user has a saved rule for this track, overlay it
+        if name in saved_rules:
+            rule = saved_rules[name]
+            entry = {
+                "name": name,
+                "mute": rule.get("mute", state["mute"]),
+                "volume_db": round(rule.get("volume_db", state["volume_db"]), 1),
+                "has_rule": True,
+            }
+        else:
+            entry = {
+                "name": name,
+                "mute": state["mute"],
+                "volume_db": round(state["volume_db"], 1),
+                "has_rule": False,
+            }
+
+        result.append(entry)
+
+    return result
 
 
 def _apply_current_scene():

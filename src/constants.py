@@ -17,14 +17,14 @@ PLUGIN_VERSION = "2.0.0"
 # Embedded HTTP server
 # ==========================================================================
 DEFAULT_HTTP_PORT = 18522          # Unlikely to collide with common services
-HTTP_HOST = "127.0.0.1"           # Bind to localhost only — never expose
+HTTP_HOST = "127.0.0.1"           # Bind to localhost only - never expose
 
 # ==========================================================================
 # Local JSON DB
 # ==========================================================================
 DB_FILENAME = "per_scene_audio_db.json"
 
-# Default DB structure — used when no file exists yet
+# Default DB structure - used when no file exists yet
 DEFAULT_DB = {
     "version": 1,
     "rules": {},        # { scene_name: { track_name: { "mute": bool, "volume_db": float? } } }

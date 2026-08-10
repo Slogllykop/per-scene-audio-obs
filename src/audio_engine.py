@@ -5,7 +5,7 @@ Core logic that applies per-scene audio rules.
 
 Given a scene name and the current rule set, this module mutes / unmutes
 and optionally sets volume for every known audio track.  Tracks that have
-no explicit rule for a scene are **muted by default** — so you only need
+no explicit rule for a scene are **muted by default** - so you only need
 to whitelist the ones you want active.
 """
 
@@ -26,27 +26,24 @@ def apply_rules_for_scene(scene_name, rules):
     rules : dict
         The full rules dict: ``{ scene: { track: { "mute": bool, ... } } }``
     """
-    scene_cfg = rules.get(scene_name)
-    if scene_cfg is None:
-        obs.script_log(
-            obs.LOG_INFO,
-            "%s No rules for scene '%s' — audio left untouched." % (PLUGIN_LOG_PREFIX, scene_name),
-        )
-        return
+    scene_cfg = rules.get(scene_name, {})
 
-    # Collect every track mentioned in *any* scene so we can mute the
-    # ones that aren't explicitly listed for the current scene.
-    all_tracks = _all_known_tracks(rules)
+    from .obs_helpers import get_scene_audio_tracks
+    scene_tracks = get_scene_audio_tracks(scene_name)
 
     applied = 0
-    for track_name in all_tracks:
-        entry = scene_cfg.get(track_name, {"mute": True})
+    for track_name in scene_tracks:
+        entry = scene_cfg.get(track_name)
+        if entry is not None:
+            muted = entry.get("mute", True)
+            set_source_muted(track_name, muted)
 
-        muted = entry.get("mute", True)
-        set_source_muted(track_name, muted)
-
-        if "volume_db" in entry:
-            set_source_volume_db(track_name, entry["volume_db"])
+            if "volume_db" in entry:
+                set_source_volume_db(track_name, entry["volume_db"])
+        else:
+            # Force unconfigured tracks in the scene to be ACTIVE
+            # to prevent mute states from bleeding over from other scenes.
+            set_source_muted(track_name, False)
 
         applied += 1
 
@@ -54,11 +51,3 @@ def apply_rules_for_scene(scene_name, rules):
         obs.LOG_INFO,
         "%s Applied %d rule(s) for scene '%s'." % (PLUGIN_LOG_PREFIX, applied, scene_name),
     )
-
-
-def _all_known_tracks(rules):
-    """Return the set of every track name referenced across all scenes."""
-    tracks = set()
-    for cfg in rules.values():
-        tracks.update(cfg.keys())
-    return tracks

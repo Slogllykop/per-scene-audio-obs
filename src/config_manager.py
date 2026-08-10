@@ -22,7 +22,7 @@ from .constants import (
 
 
 def _config_log(level, msg):
-    """Unified logger — routes through OBS script log."""
+    """Unified logger - routes through OBS script log."""
     obs.script_log(level, "%s %s" % (PLUGIN_LOG_PREFIX, msg))
 
 
@@ -65,7 +65,7 @@ class ConfigManager:
         """Load the JSON DB from disk.  Creates the default if missing."""
         if not os.path.exists(self._db_path):
             _config_log(obs.LOG_INFO,
-                 "No DB found at %s — creating default." % self._db_path)
+                 "No DB found at %s - creating default." % self._db_path)
             self.save()
             return
 
@@ -85,7 +85,7 @@ class ConfigManager:
                  "Loaded DB from %s (%d scene(s))." % (self._db_path, len(self._data.get("rules", {}))))
         except Exception:
             _config_log(obs.LOG_ERROR,
-                 "Failed to load DB — using defaults.\n" + traceback.format_exc())
+                 "Failed to load DB - using defaults.\n" + traceback.format_exc())
             self._data = copy.deepcopy(DEFAULT_DB)
 
     def save(self):

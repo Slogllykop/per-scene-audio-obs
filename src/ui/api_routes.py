@@ -8,14 +8,15 @@ operations.  All endpoints return JSON.
 
 Routes
 ------
-GET  /                → serves the dock HTML page
-GET  /api/state       → { scenes, audio_tracks, current_scene }
-GET  /api/rules       → { rules: { ... } }
-POST /api/rule        → upsert one rule   { scene, track, active, volume_db? }
-POST /api/remove_rule → delete one rule    { scene, track }
-POST /api/apply       → re-apply rules for the current scene
-POST /api/clear_scene → delete all rules for a scene  { scene }
-POST /api/clear_all   → wipe every rule
+GET  /                    → serves the dock HTML page
+GET  /api/state           → { scenes, current_scene }
+GET  /api/rules           → { rules: { ... } }
+GET  /api/scene_tracks?scene=X → { tracks: [ {name, mute, volume_db}, ... ] }
+POST /api/rule            → upsert one rule   { scene, track, active, volume_db? }
+POST /api/remove_rule     → delete one rule    { scene, track }
+POST /api/apply           → re-apply rules for the current scene
+POST /api/clear_scene     → delete all rules for a scene  { scene }
+POST /api/clear_all       → wipe every rule
 """
 
 import json
@@ -32,18 +33,19 @@ def _api_log(msg):
 
 class ApiHandler(BaseHTTPRequestHandler):
     """
-    Thin HTTP handler.  ``self.server`` must have two extra attributes
+    Thin HTTP handler.  ``self.server`` must have these attributes
     injected by http_server.py:
 
-    * ``config_manager`` — a ConfigManager instance
-    * ``get_obs_state``  — callable returning (scenes, audio_tracks, current_scene)
-    * ``apply_callback`` — callable that applies rules for the current scene
-    * ``dock_html``      — the rendered HTML string to serve at /
+    * ``config_manager``        - a ConfigManager instance
+    * ``get_obs_state``         - callable returning (scenes, current_scene)
+    * ``get_scene_tracks_cb``   - callable(scene_name) returning [{name, mute, volume_db}, ...]
+    * ``apply_callback``        - callable that applies rules for the current scene
+    * ``dock_html``             - the rendered HTML string to serve at /
     """
 
-    # Silence default stderr logging — we log through OBS instead
+    # Silence default stderr logging to prevent spam
     def log_message(self, fmt, *args):
-        _api_log(fmt % args)
+        pass
 
     # ------------------------------------------------------------------
     # CORS headers (browser dock runs on a different origin)
@@ -72,6 +74,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self._get_state()
             elif self.path == "/api/rules":
                 self._get_rules()
+            elif self.path.startswith("/api/scene_tracks"):
+                self._get_scene_tracks()
             else:
                 self._not_found()
         except Exception:
@@ -88,12 +92,11 @@ class ApiHandler(BaseHTTPRequestHandler):
     def _get_state(self):
         getter = getattr(self.server, "get_obs_state", None)
         if getter:
-            scenes, tracks, current = getter()
+            scenes, current = getter()
         else:
-            scenes, tracks, current = [], [], None
+            scenes, current = [], None
         self._json_response({
             "scenes": scenes,
-            "audio_tracks": tracks,
             "current_scene": current,
         })
 
@@ -101,6 +104,37 @@ class ApiHandler(BaseHTTPRequestHandler):
         cm = getattr(self.server, "config_manager", None)
         rules = cm.get_rules() if cm else {}
         self._json_response({"rules": rules})
+
+    def _get_scene_tracks(self):
+        """
+        GET /api/scene_tracks?scene=SceneName
+
+        Returns the audio tracks belonging to a specific scene (including
+        nested scenes).  Each track includes its current OBS mixer state
+        so the UI can show defaults.
+        """
+        # Parse query string for ?scene=
+        scene_name = ""
+        if "?" in self.path:
+            query = self.path.split("?", 1)[1]
+            for param in query.split("&"):
+                if param.startswith("scene="):
+                    # URL-decode the scene name
+                    from urllib.parse import unquote
+                    scene_name = unquote(param[6:])
+                    break
+
+        if not scene_name:
+            self._json_response({"error": "scene parameter required"}, 400)
+            return
+
+        getter = getattr(self.server, "get_scene_tracks_cb", None)
+        if getter:
+            tracks = getter(scene_name)
+        else:
+            tracks = []
+
+        self._json_response({"scene": scene_name, "tracks": tracks})
 
     # ------------------------------------------------------------------
     # POST routes
@@ -141,7 +175,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         cm = getattr(self.server, "config_manager", None)
         if cm:
             cm.set_rule(scene, track, entry)
-            _api_log("Rule set: %s / %s → %s" % (scene, track, entry))
+            _api_log("Rule set: %s / %s -> %s" % (scene, track, entry))
 
         # Auto-apply if this scene is currently live
         self._auto_apply_if_live(scene)
@@ -170,7 +204,6 @@ class ApiHandler(BaseHTTPRequestHandler):
         if cm and scene:
             rules = cm.get_rules()
             if scene in rules:
-                # Remove every track in this scene
                 for track in list(rules[scene].keys()):
                     cm.remove_rule(scene, track)
         self._json_response({"ok": True})
@@ -190,7 +223,7 @@ class ApiHandler(BaseHTTPRequestHandler):
         getter = getattr(self.server, "get_obs_state", None)
         cb = getattr(self.server, "apply_callback", None)
         if getter and cb:
-            _, _, current = getter()
+            _, current = getter()
             if current == scene:
                 cb()
 
@@ -214,4 +247,4 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def _error(self, detail):
         _api_log("HTTP handler error: " + detail)
-        self._json_response({"error": "internal error"}, 500)
+        self._json_response({"error": "internal error", "traceback": detail}, 500)

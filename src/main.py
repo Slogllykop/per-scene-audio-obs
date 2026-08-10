@@ -6,9 +6,9 @@ OBS script lifecycle entry point.
 This is the file that OBS loads via Tools → Scripts.  It wires together
 all the modules:
 
-1. ConfigManager  — persistent JSON DB
-2. EventHandler   — scene-change callback
-3. HTTP Server    — embedded web server for the browser dock UI
+1. ConfigManager  - persistent JSON DB
+2. EventHandler   - scene-change callback
+3. HTTP Server    - embedded web server for the browser dock UI
 
 It also exposes the standard OBS script_*() hooks and a minimal
 script_properties() panel so the user can see the dock URL without
@@ -93,7 +93,7 @@ def script_unload():
 
 
 def script_save(settings):
-    """Called when OBS saves the scene collection — persist our config."""
+    """Called when OBS saves the scene collection - persist our config."""
     if _config:
         _config.save()
 

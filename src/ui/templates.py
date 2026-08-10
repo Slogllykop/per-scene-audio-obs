@@ -43,9 +43,6 @@ _DOCK_HTML = r"""<!DOCTYPE html>
   --chip-muted-bg:    #ff1744;
   --chip-muted-fg:    #ffffff;
   
-  --chip-auto-bg:     #ff9100;
-  --chip-auto-fg:     #000000;
-  
   --chip-live-bg:     #10b981;
   
   --chip-vol-bg:      #29b6f6;
@@ -66,6 +63,9 @@ html, body {
   line-height: 1.4;
   overflow-x: hidden;
   user-select: none;
+  /* Lock layout to prevent height shifts */
+  height: 100%;
+  position: relative;
 }
 
 /* Scrollbar */
@@ -80,7 +80,8 @@ html, body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0;
   padding: 6px;
   gap: 6px;
   background: var(--bg-root);
@@ -105,10 +106,6 @@ html, body {
 .chip-muted {
   background: var(--chip-muted-bg);
   color: var(--chip-muted-fg);
-}
-.chip-auto {
-  background: var(--chip-auto-bg);
-  color: var(--chip-auto-fg);
 }
 .chip-vol {
   background: var(--chip-vol-bg);
@@ -345,9 +342,10 @@ html, body {
 /* -- Toast -- */
 .toast {
   position: fixed;
-  bottom: 10px;
+  /* Moved above the actions bar */
+  bottom: 45px;
   left: 50%;
-  transform: translateX(-50%) translateY(50px);
+  transform: translateX(-50%) translateY(20px);
   background: #ffffff;
   color: #000000;
   font-weight: 700;
@@ -410,7 +408,6 @@ const API = "http://127.0.0.1:{{HTTP_PORT}}/api";
 
 let scenes = [];
 let audioTracks = [];
-let rules = {};
 let selectedScene = null;
 let currentScene = null;
 
@@ -425,26 +422,36 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function refreshData() {
   try {
-    const [stateRes, rulesRes] = await Promise.all([
-      fetch(API + "/state"),
-      fetch(API + "/rules"),
-    ]);
+    const stateRes = await fetch(API + "/state");
     const state = await stateRes.json();
-    const rulesData = await rulesRes.json();
 
     scenes = state.scenes || [];
-    audioTracks = state.audio_tracks || [];
     currentScene = state.current_scene;
-    rules = rulesData.rules || {};
 
     if (!selectedScene || !scenes.includes(selectedScene)) {
       selectedScene = currentScene;
     }
 
     renderSceneTabs();
-    renderTrackList();
+    await fetchTracksForSelectedScene();
   } catch (e) {
     console.error("refreshData error:", e);
+  }
+}
+
+async function fetchTracksForSelectedScene() {
+  if (!selectedScene) {
+    audioTracks = [];
+    renderTrackList();
+    return;
+  }
+  try {
+    const res = await fetch(API + "/scene_tracks?scene=" + encodeURIComponent(selectedScene));
+    const data = await res.json();
+    audioTracks = data.tracks || [];
+    renderTrackList();
+  } catch (e) {
+    console.error(e);
   }
 }
 
@@ -480,10 +487,10 @@ function renderSceneTabs() {
     titleSpan.textContent = name;
     tab.appendChild(titleSpan);
 
-    tab.onclick = () => {
+    tab.onclick = async () => {
       selectedScene = name;
       renderSceneTabs();
-      renderTrackList();
+      await fetchTracksForSelectedScene();
     };
     container.appendChild(tab);
   });
@@ -495,19 +502,17 @@ function renderTrackList() {
     container.innerHTML = `
       <div class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4"><path d="M11 5L6 9H2V15H6L11 19V5Z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
-        <span>No audio tracks or scene selected</span>
+        <span>No audio tracks for this scene</span>
       </div>`;
     return;
   }
 
-  const sceneRules = rules[selectedScene] || {};
   container.innerHTML = "";
 
-  audioTracks.forEach(track => {
-    const entry = sceneRules[track];
-    const hasRule = !!entry;
-    const isMuted = hasRule ? entry.mute : true;
-    const volDb = (entry && entry.volume_db !== undefined) ? entry.volume_db : null;
+  audioTracks.forEach(trackObj => {
+    const track = trackObj.name;
+    const isMuted = trackObj.mute;
+    const volDb = trackObj.volume_db;
 
     const row = document.createElement("div");
     row.className = "track-row";
@@ -521,12 +526,9 @@ function renderTrackList() {
     nameEl.textContent = track;
     info.appendChild(nameEl);
 
-    // State chip
+    // State chip (only ACTIVE or MUTED)
     const chip = document.createElement("span");
-    if (!hasRule) {
-      chip.className = "chip chip-auto";
-      chip.textContent = "AUTO-MUTE";
-    } else if (isMuted) {
+    if (isMuted) {
       chip.className = "chip chip-muted";
       chip.textContent = "MUTED";
     } else {
@@ -602,10 +604,7 @@ async function setRule(scene, track, active, volumeDb) {
       body: JSON.stringify(body),
     });
 
-    const rulesRes = await fetch(API + "/rules");
-    const rulesData = await rulesRes.json();
-    rules = rulesData.rules || {};
-    renderTrackList();
+    await fetchTracksForSelectedScene();
     toast(active ? track + " → ACTIVE" : track + " → MUTED");
   } catch (e) {
     toast("Error saving rule");
@@ -615,7 +614,7 @@ async function setRule(scene, track, active, volumeDb) {
 async function applyNow() {
   try {
     await fetch(API + "/apply", { method: "POST" });
-    toast("Applied rules for " + (currentScene || "scene"));
+    toast("Applied rules for " + (selectedScene || "scene"));
   } catch (e) {
     toast("Apply failed");
   }
@@ -630,10 +629,8 @@ async function clearSceneRules() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scene: selectedScene }),
     });
-    const rulesRes = await fetch(API + "/rules");
-    const rulesData = await rulesRes.json();
-    rules = rulesData.rules || {};
-    renderTrackList();
+    
+    await fetchTracksForSelectedScene();
     toast("Cleared rules for " + selectedScene);
   } catch (e) {
     toast("Clear failed");
